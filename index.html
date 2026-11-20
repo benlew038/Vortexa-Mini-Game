@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#08081a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="盲计时接力：看不见时间、全凭感觉的多人派对小游戏。">
+  <title>盲计时接力 · Vortexa</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%238b5cf6'/%3E%3Cstop offset='1' stop-color='%2322d3ee'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='%2308081a'/%3E%3Ccircle cx='32' cy='32' r='20' fill='none' stroke='url(%23g)' stroke-width='7' stroke-dasharray='92 34' stroke-linecap='round'/%3E%3Ccircle cx='32' cy='32' r='7' fill='%23f1f1ff'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="bg" aria-hidden="true"></div>
+
+  <main id="app">
+    <!-- ============ SETUP ============ -->
+    <section class="screen" id="screen-setup">
+      <header class="topbar">
+        <span class="brand">VORTEXA</span>
+        <button type="button" class="chip-btn" id="btn-lang">EN</button>
+      </header>
+
+      <div class="hero">
+        <h1 data-i18n="title">盲计时接力</h1>
+        <p class="sub" data-i18n="subtitle"></p>
+      </div>
+
+      <div class="card settings">
+        <div class="row">
+          <span class="row-label" data-i18n="target">目标时间</span>
+          <div class="stepper">
+            <button type="button" class="step" data-field="target" data-delta="-1" aria-label="-1">−</button>
+            <label class="step-val">
+              <input id="in-target" type="number" inputmode="decimal" step="0.1" min="1" max="3600" aria-label="target">
+              <span data-i18n="sec">秒</span>
+            </label>
+            <button type="button" class="step" data-field="target" data-delta="1" aria-label="+1">+</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <span class="row-label"><span data-i18n="tolerance">容差范围</span> <small>±</small></span>
+          <div class="stepper">
+            <button type="button" class="step" data-field="tolerance" data-delta="-0.5" aria-label="-0.5">−</button>
+            <label class="step-val">
+              <input id="in-tol" type="number" inputmode="decimal" step="0.1" min="0" max="600" aria-label="tolerance">
+              <span data-i18n="sec">秒</span>
+            </label>
+            <button type="button" class="step" data-field="tolerance" data-delta="0.5" aria-label="+0.5">+</button>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="players-head">
+          <span><span data-i18n="players">玩家</span><b id="player-count">4</b></span>
+          <button type="button" class="chip-btn" id="btn-add" data-i18n="addPlayer">+ 添加</button>
+        </div>
+        <ol class="players" id="player-list"></ol>
+
+        <div class="divider"></div>
+
+        <label class="toggle">
+          <input type="checkbox" id="in-auto">
+          <span class="track" aria-hidden="true"></span>
+          <span class="toggle-text"><b data-i18n="autoReveal"></b><small data-i18n="autoRevealHint"></small></span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="in-sound">
+          <span class="track" aria-hidden="true"></span>
+          <span class="toggle-text"><b data-i18n="sound"></b><small data-i18n="soundHint"></small></span>
+        </label>
+      </div>
+
+      <details class="card rules">
+        <summary data-i18n="howTo">玩法说明</summary>
+        <ol id="rules-list"></ol>
+      </details>
+
+      <div class="setup-footer">
+        <button type="button" class="btn primary big" id="btn-start" data-i18n="startGame">开始游戏</button>
+        <p class="stats" id="stats"></p>
+      </div>
+    </section>
+
+    <!-- ============ GAME ============ -->
+    <section class="screen" id="screen-game">
+      <header class="topbar">
+        <span class="pill goal"></span>
+        <button type="button" class="icon-btn quit" aria-label="quit">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </header>
+
+      <div class="turn">
+        <p class="turn-label" id="turn-label"></p>
+        <h2 class="turn-name" id="turn-name"></h2>
+        <div class="dots" id="dots"></div>
+      </div>
+
+      <div class="dial-wrap">
+        <button type="button" class="dial idle" id="dial">
+          <span class="spinner" id="spinner" aria-hidden="true"><span class="glow"></span><span class="ring"></span></span>
+          <span class="dial-core"><span class="dial-label" id="dial-label"></span></span>
+        </button>
+      </div>
+
+      <p class="hint" id="hint"></p>
+    </section>
+
+    <!-- ============ HANDOVER ============ -->
+    <section class="screen" id="screen-handover">
+      <header class="topbar">
+        <span class="pill goal"></span>
+        <button type="button" class="icon-btn quit" aria-label="quit">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </header>
+
+      <div class="handover">
+        <div class="check" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+        </div>
+        <p class="done-text" id="done-text"></p>
+        <p class="pass-label" data-i18n="passTo"></p>
+        <h2 class="next-name" id="next-name"></h2>
+      </div>
+
+      <div class="actions arm">
+        <button type="button" class="btn primary big" id="btn-ready" data-i18n="ready"></button>
+        <button type="button" class="btn ghost" id="btn-reveal"></button>
+      </div>
+    </section>
+
+    <!-- ============ REVEAL ============ -->
+    <section class="screen" id="screen-reveal">
+      <div class="reveal-top">
+        <p class="total-label" data-i18n="total"></p>
+        <div class="big-time"><span id="rv-time">0.00</span><span class="unit">s</span></div>
+        <div class="result after">
+          <span class="badge" id="rv-badge"></span>
+          <p class="diff" id="rv-diff"></p>
+          <p class="quip" id="rv-quip"></p>
+        </div>
+      </div>
+
+      <div class="scale">
+        <div class="scale-track">
+          <div class="zone" id="rv-zone"></div>
+          <div class="target-line" id="rv-tline"></div>
+          <div class="marker" id="rv-marker"></div>
+        </div>
+        <div class="scale-labels" id="rv-labels"></div>
+      </div>
+
+      <p class="skip" data-i18n="tapSkip"></p>
+
+      <div class="card segs after">
+        <h3 data-i18n="segments"></h3>
+        <ol id="rv-segs"></ol>
+      </div>
+
+      <div class="actions after">
+        <button type="button" class="btn primary big" id="btn-again" data-i18n="again"></button>
+        <button type="button" class="btn ghost" id="btn-settings" data-i18n="settings"></button>
+      </div>
+    </section>
+  </main>
+
+  <canvas id="confetti" aria-hidden="true"></canvas>
+  <script src="app.js"></script>
+</body>
+</html>
