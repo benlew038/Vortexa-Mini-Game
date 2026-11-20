@@ -16,10 +16,11 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- 背景光暈 -->
   <div class="bg" aria-hidden="true"></div>
 
   <main id="app">
-    <!-- ============ SETUP ============ -->
+    <!-- ============ 設定頁：主持人設定目標時間、容差、玩家 ============ -->
     <section class="screen" id="screen-setup">
       <header class="topbar">
         <span class="brand">VORTEXA</span>
@@ -89,7 +90,7 @@
       </div>
     </section>
 
-    <!-- ============ GAME ============ -->
+    <!-- ============ 計時頁：大圓形按鈕「開始 / 停止」，不顯示任何時間 ============ -->
     <section class="screen" id="screen-game">
       <header class="topbar">
         <span class="pill goal"></span>
@@ -114,7 +115,7 @@
       <p class="hint" id="hint"></p>
     </section>
 
-    <!-- ============ HANDOVER ============ -->
+    <!-- ============ 交接頁：提示把手機交給下一位 ============ -->
     <section class="screen" id="screen-handover">
       <header class="topbar">
         <span class="pill goal"></span>
@@ -138,7 +139,7 @@
       </div>
     </section>
 
-    <!-- ============ REVEAL ============ -->
+    <!-- ============ 揭曉頁：總時間、勝負、刻度條、每棒用時 ============ -->
     <section class="screen" id="screen-reveal">
       <div class="reveal-top">
         <p class="total-label" data-i18n="total"></p>
@@ -173,6 +174,7 @@
     </section>
   </main>
 
+  <!-- 成功時的彩帶動畫畫布 -->
   <canvas id="confetti" aria-hidden="true"></canvas>
   <script src="app.js"></script>
 </body>

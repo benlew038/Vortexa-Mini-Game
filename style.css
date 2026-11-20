@@ -1,3 +1,9 @@
+/*
+ * 盲計時接力 樣式表
+ * 深色主題，紫 / 青漸變。手機直屏優先，最大寬度 460px。
+ */
+
+/* 顏色、圓角、字體等全域變數 */
 :root {
   --bg: #08081a;
   --card: rgba(255, 255, 255, 0.045);
@@ -46,6 +52,7 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
 :focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
 ol { list-style: none; }
 
+/* 固定在最底層的背景光暈 */
 .bg {
   position: fixed;
   inset: 0;
@@ -69,11 +76,12 @@ ol { list-style: none; }
   padding: calc(env(safe-area-inset-top, 0px) + 12px) 20px calc(env(safe-area-inset-bottom, 0px) + 20px);
 }
 
+/* 每個畫面預設隱藏，加上 .active 才顯示，並播放淡入動畫 */
 .screen { display: none; flex: 1; flex-direction: column; gap: 16px; }
 .screen.active { display: flex; animation: enter 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 @keyframes enter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 
-/* ---------- shared ---------- */
+/* ---------- 共用元件：頂欄、標籤、卡片、按鈕 ---------- */
 .topbar { display: flex; align-items: center; justify-content: space-between; min-height: 44px; }
 .brand { font-family: var(--font-num); font-weight: 700; font-size: 12px; letter-spacing: 0.35em; color: var(--muted); }
 .chip-btn {
@@ -139,7 +147,7 @@ ol { list-style: none; }
 .btn.ghost { background: var(--card); border: 1px solid var(--line); color: var(--muted); }
 .actions { display: flex; flex-direction: column; gap: 10px; }
 
-/* ---------- setup ---------- */
+/* ---------- 設定頁 ---------- */
 .hero { padding: 6px 0 2px; }
 .hero h1 {
   font-size: clamp(36px, 11vw, 46px);
@@ -332,7 +340,7 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 }
 .stats { text-align: center; color: var(--dim); font-size: 13px; min-height: 19px; }
 
-/* ---------- game ---------- */
+/* ---------- 計時頁 ---------- */
 .turn { text-align: center; padding-top: 6px; }
 .turn-label { font-family: var(--font-num); font-size: 14px; letter-spacing: 0.08em; color: var(--muted); }
 .turn-name {
@@ -349,6 +357,7 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 .dot.done { background: linear-gradient(135deg, var(--violet), var(--cyan)); border-color: transparent; }
 .dot.now { border: 2px solid var(--cyan); background: transparent; box-shadow: 0 0 10px rgba(34, 211, 238, 0.6); }
 
+/* 計時按鈕：外層 .spinner 旋轉發光環，內層 .dial-core 是按鈕本體 */
 .dial-wrap { flex: 1; display: grid; place-items: center; padding: 8px 0; margin: 0 -20px; overflow: hidden; }
 .dial {
   --d: min(74vw, 300px, 48vh);
@@ -408,7 +417,7 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 @keyframes press { 50% { transform: scale(0.95); } }
 .hint { text-align: center; color: var(--muted); font-size: 15px; min-height: 24px; padding-bottom: 8px; }
 
-/* ---------- handover ---------- */
+/* ---------- 交接頁 ---------- */
 .handover {
   flex: 1;
   display: flex;
@@ -449,10 +458,11 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
   background-clip: text;
   color: transparent;
 }
+/* 交接頁按鈕延遲淡入（配合 JS 的防誤觸延遲） */
 .screen.active .arm { animation: fadeUp 0.35s ease 0.45s both; }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
-/* ---------- reveal ---------- */
+/* ---------- 揭曉頁 ---------- */
 #screen-reveal { gap: 18px; }
 .reveal-top { text-align: center; padding-top: 18px; }
 .total-label { color: var(--muted); font-size: 14px; letter-spacing: 0.1em; }
@@ -475,6 +485,7 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 .diff { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .quip { color: var(--muted); font-size: 14px; }
 
+/* .after = 數字動畫結束後才出現的內容 */
 .after { opacity: 0; transform: translateY(10px); pointer-events: none; transition: opacity 0.45s ease, transform 0.45s ease; }
 .revealed .after { opacity: 1; transform: none; pointer-events: auto; }
 .revealed .segs.after { transition-delay: 0.15s; }
@@ -525,11 +536,13 @@ input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; marg
 
 #confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 50; }
 
+/* 矮螢幕（如 iPhone SE）縮小間距 */
 @media (max-height: 640px) {
   .hero h1 { font-size: 32px; }
   .reveal-top { padding-top: 4px; }
   .pass-label { margin-top: 14px; }
 }
+/* 系統開啟「減少動態效果」時，關閉大部分動畫 */
 @media (prefers-reduced-motion: reduce) {
   .screen.active, .screen.active .check, .screen.active .arm { animation: none; }
   .dial.idle .spinner { animation-duration: 30s; }
