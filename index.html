@@ -16,11 +16,11 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- 背景光暈 -->
+  <!-- Background glow -->
   <div class="bg" aria-hidden="true"></div>
 
   <main id="app">
-    <!-- ============ 設定頁：主持人設定目標時間、容差、玩家 ============ -->
+    <!-- ============ SETUP: host sets target time, tolerance, players ============ -->
     <section class="screen" id="screen-setup">
       <header class="topbar">
         <span class="brand">VORTEXA</span>
@@ -90,7 +90,7 @@
       </div>
     </section>
 
-    <!-- ============ 計時頁：大圓形按鈕「開始 / 停止」，不顯示任何時間 ============ -->
+    <!-- ============ GAME: big Start / Stop dial, no time ever shown ============ -->
     <section class="screen" id="screen-game">
       <header class="topbar">
         <span class="pill goal"></span>
@@ -115,7 +115,7 @@
       <p class="hint" id="hint"></p>
     </section>
 
-    <!-- ============ 交接頁：提示把手機交給下一位 ============ -->
+    <!-- ============ HANDOVER: pass the phone to the next player ============ -->
     <section class="screen" id="screen-handover">
       <header class="topbar">
         <span class="pill goal"></span>
@@ -139,7 +139,7 @@
       </div>
     </section>
 
-    <!-- ============ 揭曉頁：總時間、勝負、刻度條、每棒用時 ============ -->
+    <!-- ============ REVEAL: total time, result, scale bar, per-turn times ============ -->
     <section class="screen" id="screen-reveal">
       <div class="reveal-top">
         <p class="total-label" data-i18n="total"></p>
@@ -174,7 +174,7 @@
     </section>
   </main>
 
-  <!-- 成功時的彩帶動畫畫布 -->
+  <!-- Confetti canvas for wins -->
   <canvas id="confetti" aria-hidden="true"></canvas>
   <script src="app.js"></script>
 </body>

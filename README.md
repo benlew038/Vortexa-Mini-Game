@@ -1,40 +1,40 @@
-# 盲计时接力 · Blind Timer Relay
+# Blind Timer Relay (盲计时接力)
 
-Vortexa 多人派对小游戏。全组共用一部手机，看不见时间，全凭感觉接力，让总时间停在目标附近。
+A Vortexa party mini game. The whole group shares one phone. Nobody can see the time: players take turns timing by feel and try to land the total on the target.
 
-## 玩法
+## How to play
 
-1. 主持人设定目标时间（默认 30 秒）和容差范围（默认 ±3 秒）。
-2. 轮到的玩家按「开始」，在心里默数，再按「停止」，然后把手机交给下一位。
-3. 计时接着上一位继续累加，交接手机时暂停。屏幕全程不显示时间。
-4. 揭晓时，总时间与目标相差在容差范围内，全组挑战成功。
-   例如目标 30 秒、容差 ±3 秒：27.8 秒成功，34.3 秒失败。
+1. The host sets a target time (default 30 seconds) and a tolerance (default ±3 seconds).
+2. The current player presses **Start**, counts in their head, presses **Stop**, then passes the phone to the next player.
+3. The timer keeps adding up from the previous player and pauses during the hand-over. No time is shown at any point.
+4. At the reveal, the group wins if the total is within the tolerance of the target.
+   Example with target 30 s and tolerance ±3 s: 27.8 s wins, 34.3 s loses.
 
-## 功能
+## Features
 
-- 自定义目标时间、容差、玩家人数和名字
-- 两种结束方式：最后一位停止后自动揭晓，或多轮循环、随时揭晓
-- 揭晓动画、每棒用时明细、胜负音效、彩带
-- 中文 / English 切换
-- 刷新或误关页面后自动恢复进度（计时不会丢失）
-- 防误触：连点保护、交接页按钮延迟生效
-- 游戏中屏幕保持常亮（支持 Wake Lock 的浏览器）
+- Custom target time, tolerance, number of players and names
+- Two end modes: auto-reveal after the last player, or loop through players and reveal any time
+- Count-up reveal animation, per-turn breakdown, win/lose sounds, confetti
+- Chinese / English toggle
+- Progress survives a page reload or accidental close (no time is lost)
+- Anti-mistap: double-tap guard, delayed buttons on the hand-over screen
+- Screen stays on during a game (browsers with Wake Lock support)
 
-## 技术
+## Tech
 
-纯静态网页：`index.html` + `style.css` + `app.js`，无框架、无构建步骤、无依赖。
+Static web page: `index.html` + `style.css` + `app.js`. No framework, no build step, no dependencies.
 
-计时使用 `performance.now()`，按开始和停止的时间差计算，精度到 0.01 秒。
-胜负判定使用整数（百分之一秒），没有浮点误差。
+Timing uses `performance.now()`, measured from the Start and Stop timestamps, with 0.01 s precision.
+The win check uses integer centiseconds, so there are no floating-point errors.
 
-## 本地运行
+## Run locally
 
-直接用浏览器打开 `index.html` 即可。
+Open `index.html` in a browser.
 
-## 部署（GitHub Pages）
+## Deploy (GitHub Pages)
 
-1. 把代码 push 到 GitHub 的 `main` 分支。
-2. 在 repo 的 **Settings → Pages** 中，Source 选择 **Deploy from a branch**，分支选 `main`，目录选 `/ (root)`，保存。
-3. 约 1 分钟后，网址为 `https://<用户名>.github.io/<repo 名>/`。
+1. Push the code to the `main` branch on GitHub.
+2. In the repo, go to **Settings → Pages**. Set Source to **Deploy from a branch**, branch `main`, folder `/ (root)`, then save.
+3. After about 1 minute, the site is live at `https://<username>.github.io/<repo-name>/`.
 
-之后每次 push 到 `main` 都会自动更新网站。
+Every push to `main` then updates the site automatically.

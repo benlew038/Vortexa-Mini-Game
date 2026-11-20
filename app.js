@@ -1,37 +1,37 @@
 /*
- * 盲計時接力（Blind Timer Relay）— Vortexa 派對小遊戲
- * 純原生 JavaScript，沒有任何外部依賴。
+ * Blind Timer Relay — Vortexa party mini game
+ * Plain vanilla JavaScript, no external dependencies.
  *
- * 畫面流程：
- *   設定頁 (setup) → 計時頁 (game) → 交接頁 (handover) → 計時頁 … → 揭曉頁 (reveal)
+ * Screen flow:
+ *   setup → game → handover → game … → reveal
  *
- * 遊戲階段 game.phase：
- *   ready     等待當前玩家按「開始」
- *   running   正在計時
- *   handover  這一棒結束，等待把手機交給下一位
- *   reveal    已經揭曉結果
+ * Game phases (game.phase):
+ *   ready     waiting for the current player to press Start
+ *   running   timer is running
+ *   handover  leg finished, waiting for the phone to be passed on
+ *   reveal    result has been revealed
  *
- * 時間單位：內部一律用「百分之一秒」(cs, centisecond) 的整數保存，避免浮點誤差。
+ * Time unit: all times are stored internally as integer centiseconds (cs) to avoid float errors.
  */
 (() => {
   'use strict';
 
-  // ================================================================ 設定常數
-  // localStorage 的儲存鍵名（加上版本號，以後改資料格式時不會讀到舊資料）
+  // ================================================================ constants
+  // localStorage keys (versioned so a future data format never reads stale data)
   const KEYS = {
-    settings: 'vx-blind:settings:v1', // 主持人的設定
-    game: 'vx-blind:game:v1', // 進行中的遊戲（刷新頁面後可恢復）
-    stats: 'vx-blind:stats:v1', // 戰績：已玩局數、成功局數
+    settings: 'vx-blind:settings:v1', // host settings
+    game: 'vx-blind:game:v1', // game in progress (restored after a page reload)
+    stats: 'vx-blind:stats:v1', // stats: games played, games won
   };
-  // 各項輸入的上下限
+  // Input limits
   const LIMITS = { targetMin: 1, targetMax: 3600, tolMin: 0, tolMax: 600, players: 20, nameLen: 24 };
-  // 防誤觸時間（毫秒）：dial = 計時按鈕兩次按下的最短間隔；screen = 換頁後按鈕延遲生效的時間
+  // Anti-mistap guards (ms): dial = minimum gap between two dial presses; screen = button delay after a screen change
   const GUARD = { dial: 350, screen: 600 };
-  // 所有合法的遊戲階段
+  // All valid game phases
   const PHASES = ['ready', 'running', 'handover', 'reveal'];
 
-  // ================================================================ 多語言文字
-  // zh = 簡體中文，en = 英文。值可以是字串、陣列，或接收參數的函式。
+  // ================================================================ UI text
+  // zh = Simplified Chinese, en = English. Values are strings, arrays, or functions that take arguments.
   const I18N = {
     zh: {
       docTitle: '盲计时接力 · Vortexa',
@@ -149,20 +149,20 @@
     },
   };
 
-  // ================================================================ 小工具函式
-  const $ = (sel, root = document) => root.querySelector(sel); // 找一個元素
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel)); // 找全部元素（回傳陣列）
-  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v)); // 把數值限制在 lo ~ hi 之間
-  const round1 = (v) => Math.round(v * 10) / 10; // 四捨五入到小數點後 1 位
-  // 把輸入轉成數字；無效時回傳 fallback（也接受歐洲寫法的逗號小數點）
+  // ================================================================ helpers
+  const $ = (sel, root = document) => root.querySelector(sel); // find one element
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel)); // find all elements (as an array)
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v)); // limit a value to lo..hi
+  const round1 = (v) => Math.round(v * 10) / 10; // round to 1 decimal place
+  // Parse input as a number; return fallback when invalid (also accepts a comma decimal separator)
   const toNum = (v, fallback) => {
     const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
     return Number.isFinite(n) ? n : fallback;
   };
-  const fmtSec = (v) => String(round1(v)); // 秒數顯示：30 → "30"，2.5 → "2.5"
-  const fmtCs = (cs) => (cs / 100).toFixed(2); // 百分之一秒 → "12.34"
+  const fmtSec = (v) => String(round1(v)); // seconds display: 30 -> "30", 2.5 -> "2.5"
+  const fmtCs = (cs) => (cs / 100).toFixed(2); // centiseconds -> "12.34"
 
-  // 建立一個 HTML 元素。用 textContent 填文字，玩家名字不會被當成 HTML 執行（防 XSS）
+  // Create an element. Text goes in via textContent, so player names are never parsed as HTML (no XSS)
   function el(tag, cls, text) {
     const node = document.createElement(tag);
     if (cls) node.className = cls;
@@ -170,7 +170,7 @@
     return node;
   }
 
-  // localStorage 讀寫包裝：無痕模式或儲存空間被禁用時不會報錯
+  // localStorage wrapper: never throws in private mode or when storage is blocked
   const store = {
     get(key, fallback) {
       try {
@@ -181,49 +181,49 @@
       }
     },
     set(key, value) {
-      try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) { /* 無痕模式：忽略 */ }
+      try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) { /* private mode: ignore */ }
     },
     del(key) {
-      try { localStorage.removeItem(key); } catch (_) { /* 忽略 */ }
+      try { localStorage.removeItem(key); } catch (_) { /* ignore */ }
     },
   };
 
-  // 取得目前語言的文字。t('goal', 30, 3) 會呼叫對應的函式並代入參數
+  // Get UI text in the current language. t('goal', 30, 3) calls the function with those arguments
   function t(key, ...args) {
     const dict = I18N[settings.lang] || I18N.zh;
     const v = key in dict ? dict[key] : I18N.zh[key];
     return typeof v === 'function' ? v(...args) : v;
   }
 
-  // ================================================================ 遊戲狀態
-  // 清理讀取到的設定：任何欄位缺失或不合法，就換成預設值
+  // ================================================================ state
+  // Clean loaded settings: any missing or invalid field falls back to its default
   function sanitizeSettings(raw) {
     const s = raw && typeof raw === 'object' ? raw : {};
     const players = Array.isArray(s.players)
       ? s.players.slice(0, LIMITS.players).map((p) => String(p == null ? '' : p).slice(0, LIMITS.nameLen))
-      : ['', '', '', '']; // 預設 4 位玩家（名字留空 = 顯示「玩家 1、2…」）
+      : ['', '', '', '']; // default 4 players (empty name = shown as "Player 1, 2…")
     if (!players.length) players.push('');
     return {
-      target: round1(clamp(toNum(s.target, 30), LIMITS.targetMin, LIMITS.targetMax)), // 目標秒數，預設 30
-      tolerance: round1(clamp(toNum(s.tolerance, 3), LIMITS.tolMin, LIMITS.tolMax)), // 容差秒數，預設 ±3
+      target: round1(clamp(toNum(s.target, 30), LIMITS.targetMin, LIMITS.targetMax)), // target seconds, default 30
+      tolerance: round1(clamp(toNum(s.tolerance, 3), LIMITS.tolMin, LIMITS.tolMax)), // tolerance seconds, default ±3
       players,
-      autoReveal: s.autoReveal !== false, // 最後一位停止後自動揭曉，預設開
-      sound: s.sound !== false, // 音效，預設開
-      lang: s.lang === 'en' ? 'en' : 'zh', // 介面語言，預設中文
+      autoReveal: s.autoReveal !== false, // auto-reveal after the last player, default on
+      sound: s.sound !== false, // sound, default on
+      lang: s.lang === 'en' ? 'en' : 'zh', // UI language, default Chinese
     };
   }
 
-  // 清理戰績資料：只接受 0 或正整數
+  // Clean loaded stats: only accept non-negative integers
   function sanitizeStats(raw) {
     const s = raw && typeof raw === 'object' ? raw : {};
     const int = (v) => (Number.isInteger(v) && v >= 0 ? v : 0);
     return { played: int(s.played), won: int(s.won) };
   }
 
-  // 當前這一棒按「開始」時的 performance.now()。只存在記憶體中，不寫入 localStorage
+  // performance.now() when the current leg started. Kept in memory only, never written to localStorage
   let startPerf = 0;
 
-  // 從 localStorage 讀取進行中的遊戲，逐項檢查格式；資料損壞就當作沒有遊戲
+  // Load the game in progress from localStorage and validate every field; corrupt data = no game
   function loadGame() {
     const g = store.get(KEYS.game, null);
     if (!g || typeof g !== 'object' || !PHASES.includes(g.phase)) return null;
@@ -234,41 +234,41 @@
     if (!segsOk) return null;
     if ((g.phase === 'handover' || g.phase === 'reveal') && !g.segs.length) return null;
     if (g.phase === 'running') {
-      // 計時中途刷新了頁面：用牆上時鐘 (Date.now) 算出已經過的時間，接著計，不會丟失
+      // Page was reloaded mid-leg: use the wall clock (Date.now) to recover elapsed time, so none is lost
       const elapsed = clamp(Date.now() - toNum(g.startWall, Date.now()), 0, 864e5);
       startPerf = performance.now() - elapsed;
     }
     return g;
   }
 
-  let settings = sanitizeSettings(store.get(KEYS.settings, null)); // 主持人設定
-  let stats = sanitizeStats(store.get(KEYS.stats, null)); // 戰績
-  // 當前遊戲（沒有遊戲時為 null）。結構：
-  //   phase     遊戲階段
-  //   segs      已完成的每一棒：[{ p: 玩家索引, cs: 用時（百分之一秒） }]
-  //   startWall 當前這一棒開始時的 Date.now()（用於刷新後恢復）
-  //   target    目標秒數；tol 容差秒數
-  //   players   玩家名字（開局時鎖定，中途改設定不影響本局）
-  //   auto      是否最後一位停止後自動揭曉
-  //   counted   本局是否已計入戰績（防止刷新後重複計算）
+  let settings = sanitizeSettings(store.get(KEYS.settings, null)); // host settings
+  let stats = sanitizeStats(store.get(KEYS.stats, null)); // stats
+  // Current game (null when there is none). Shape:
+  //   phase     game phase
+  //   segs      finished legs: [{ p: player index, cs: duration in centiseconds }]
+  //   startWall Date.now() when the current leg started (used to recover after a reload)
+  //   target    target seconds; tol = tolerance seconds
+  //   players   player names (locked at game start; editing settings mid-game has no effect)
+  //   auto      auto-reveal after the last player
+  //   counted   whether this game has been added to stats (prevents double counting after a reload)
   let game = loadGame();
 
   const saveSettings = () => store.set(KEYS.settings, settings);
   const saveGame = () => { if (game) store.set(KEYS.game, game); };
-  const totalCs = () => game.segs.reduce((sum, s) => sum + s.cs, 0); // 所有棒的總用時
+  const totalCs = () => game.segs.reduce((sum, s) => sum + s.cs, 0); // total time of all legs
 
-  // 勝負判定。全部換成整數（百分之一秒）比較，避免浮點誤差
-  // 例：目標 30、容差 3，總時間 33.00 → 差 300 ≤ 300 → 贏；33.01 → 差 301 → 輸
+  // Win check. Everything is compared as integer centiseconds to avoid float errors
+  // e.g. target 30, tolerance 3: total 33.00 -> diff 300 <= 300 -> win; 33.01 -> diff 301 -> lose
   function judge(total, target, tol) {
     const diffCs = total - Math.round(target * 100);
     return { diffCs, win: Math.abs(diffCs) <= Math.round(tol * 100) };
   }
 
-  // ================================================================ 音效、震動、螢幕常亮
-  // 音效：用 Web Audio API 即時合成，不需要音效檔
+  // ================================================================ sound, vibration, wake lock
+  // Sound effects: synthesized live with the Web Audio API, no audio files needed
   const sfx = (() => {
     let ctx = null;
-    // 建立或喚醒音訊環境
+    // Create or resume the audio context
     function ensure() {
       if (!ctx) {
         const AC = window.AudioContext || window.webkitAudioContext;
@@ -278,7 +278,7 @@
       if (ctx.state === 'suspended') ctx.resume();
       return ctx;
     }
-    // 播放一個音：頻率 freq (Hz)、長度 dur (秒)、波形 type、延遲 when (秒)、音量 vol
+    // Play one tone: frequency freq (Hz), length dur (s), waveform type, delay when (s), volume vol
     function tone(freq, dur, type = 'sine', when = 0, vol = 0.14) {
       if (!settings.sound) return;
       try {
@@ -289,29 +289,29 @@
         const gain = c.createGain();
         osc.type = type;
         osc.frequency.setValueAtTime(freq, t0);
-        // 音量包絡：快速淡入，再指數淡出，避免爆音
+        // Volume envelope: fast fade-in, exponential fade-out, no clicks
         gain.gain.setValueAtTime(0.0001, t0);
         gain.gain.exponentialRampToValueAtTime(vol, t0 + 0.015);
         gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
         osc.connect(gain).connect(c.destination);
         osc.start(t0);
         osc.stop(t0 + dur + 0.05);
-      } catch (_) { /* 瀏覽器不支援音訊：忽略 */ }
+      } catch (_) { /* audio not supported: ignore */ }
     }
     return {
-      // iOS 規定音訊必須在使用者點擊時啟用，所以在「開始遊戲」等按鈕的 click 裡呼叫
-      unlock() { try { ensure(); } catch (_) { /* 忽略 */ } },
-      start() { tone(660, 0.12); tone(990, 0.14, 'sine', 0.06); }, // 開始：上揚兩聲
-      stop() { tone(520, 0.16, 'triangle'); }, // 停止：一聲
-      win() { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.28, 'triangle', i * 0.11)); }, // 成功：上行琶音
-      lose() { [392, 330, 247].forEach((f, i) => tone(f, 0.32, 'sawtooth', i * 0.17, 0.06)); }, // 失敗：下行三聲
+      // iOS only allows audio to start from a user click, so call this inside button click handlers
+      unlock() { try { ensure(); } catch (_) { /* ignore */ } },
+      start() { tone(660, 0.12); tone(990, 0.14, 'sine', 0.06); }, // start: two rising beeps
+      stop() { tone(520, 0.16, 'triangle'); }, // stop: one beep
+      win() { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.28, 'triangle', i * 0.11)); }, // win: rising arpeggio
+      lose() { [392, 330, 247].forEach((f, i) => tone(f, 0.32, 'sawtooth', i * 0.17, 0.06)); }, // lose: three falling tones
     };
   })();
 
-  // 手機震動（只有 Android 支援，iOS 會自動忽略）
-  const buzz = (pattern) => { try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (_) { /* 忽略 */ } };
+  // Phone vibration (Android only; iOS ignores it)
+  const buzz = (pattern) => { try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (_) { /* ignore */ } };
 
-  // 螢幕常亮（Wake Lock API）：遊戲中防止手機自動熄屏
+  // Keep the screen on (Wake Lock API) so the phone does not sleep mid-game
   const wake = {
     lock: null,
     async on() {
@@ -319,38 +319,38 @@
       try {
         const lock = await navigator.wakeLock.request('screen');
         this.lock = lock;
-        // 切到後台時系統會自動釋放，這裡同步清掉紀錄，回到前台時再重新申請
+        // The system releases the lock when the page goes to the background; forget it and re-request on return
         lock.addEventListener('release', () => { if (this.lock === lock) this.lock = null; });
-      } catch (_) { /* 瀏覽器不允許：忽略 */ }
+      } catch (_) { /* not allowed: ignore */ }
     },
     async off() {
       const lock = this.lock;
       this.lock = null;
-      try { if (lock) await lock.release(); } catch (_) { /* 忽略 */ }
+      try { if (lock) await lock.release(); } catch (_) { /* ignore */ }
     },
   };
 
-  // 計時中的外環旋轉動畫：速度和大小隨機變化，玩家無法靠「數圈數」來估算秒數
+  // Ring animation while timing: speed and size change randomly, so nobody can count rotations as seconds
   const spin = (() => {
     const node = $('#spinner');
-    let raf = 0; // requestAnimationFrame 的編號（0 = 沒在轉）
-    let angle = 0; // 目前角度
-    let speed = 0; // 目前轉速（度/秒）
-    let targetSpeed = 0; // 正在逐漸接近的目標轉速
-    let scale = 1; // 目前縮放
-    let targetScale = 1; // 目標縮放
-    let nextAt = 0; // 下次隨機換速度的時間
-    let last = 0; // 上一幀的時間
+    let raf = 0; // requestAnimationFrame id (0 = not spinning)
+    let angle = 0; // current angle
+    let speed = 0; // current speed (deg/s)
+    let targetSpeed = 0; // speed we are easing towards
+    let scale = 1; // current scale
+    let targetScale = 1; // scale we are easing towards
+    let nextAt = 0; // time of the next random speed change
+    let last = 0; // time of the previous frame
     function frame(now) {
-      const dt = clamp((now - last) / 1000, 0, 0.05); // 距離上一幀的秒數（上限 0.05，防止切回前台時暴衝）
+      const dt = clamp((now - last) / 1000, 0, 0.05); // seconds since last frame (capped so it does not jump after returning from background)
       last = now;
       if (now >= nextAt) {
-        // 每 0.25 ~ 1.35 秒隨機換一次目標轉速和大小
+        // Pick a new random target speed and size every 0.25–1.35 s
         targetSpeed = 110 + Math.random() * 520;
         targetScale = 0.97 + Math.random() * 0.07;
         nextAt = now + 250 + Math.random() * 1100;
       }
-      // 平滑過渡到目標值，避免突然跳動
+      // Ease smoothly towards the targets, no sudden jumps
       const k = Math.min(1, dt * 4);
       speed += (targetSpeed - speed) * k;
       scale += (targetScale - scale) * k;
@@ -360,7 +360,7 @@
     }
     return {
       start() {
-        if (raf) return; // 已經在轉就不重複啟動
+        if (raf) return; // already spinning
         last = performance.now();
         nextAt = 0;
         speed = 200;
@@ -369,59 +369,59 @@
       stop() {
         if (raf) cancelAnimationFrame(raf);
         raf = 0;
-        node.style.transform = ''; // 交還給 CSS 的慢速勻速旋轉
+        node.style.transform = ''; // hand back to the slow, steady CSS spin
       },
     };
   })();
 
-  // 成功時的彩帶動畫（用 canvas 自己畫，不用外部函式庫）
+  // Confetti on a win (drawn on a canvas, no external library)
   const confetti = (() => {
     const canvas = $('#confetti');
     const ctx = canvas.getContext('2d');
     const colors = ['#8b5cf6', '#22d3ee', '#f472b6', '#34d399', '#fbbf24', '#ffffff'];
     let raf = 0;
-    // 停止動畫並清空畫布
+    // Stop the animation and clear the canvas
     function clear() {
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
-    // 噴出一次彩帶
+    // Fire one burst of confetti
     function burst() {
       clear();
-      // 依螢幕像素密度設定畫布大小（最高 2 倍），高解析度螢幕上不會模糊
+      // Size the canvas for the screen pixel density (max 2x) so it stays sharp on high-DPI screens
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       const W = window.innerWidth;
       const H = window.innerHeight;
       canvas.width = Math.round(W * dpr);
       canvas.height = Math.round(H * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      // 160 片彩紙：從畫面中上方向四周噴出
+      // 160 pieces, launched outwards from the upper middle of the screen
       const parts = Array.from({ length: 160 }, (_, i) => ({
-        x: W / 2 + (Math.random() - 0.5) * W * 0.3, // 位置
+        x: W / 2 + (Math.random() - 0.5) * W * 0.3, // position
         y: H * 0.3,
-        vx: (Math.random() - 0.5) * 15, // 速度
+        vx: (Math.random() - 0.5) * 15, // velocity
         vy: -4 - Math.random() * 14,
-        w: 6 + Math.random() * 6, // 大小
+        w: 6 + Math.random() * 6, // size
         h: 8 + Math.random() * 8,
-        r: Math.random() * Math.PI * 2, // 旋轉角度
-        vr: (Math.random() - 0.5) * 0.4, // 旋轉速度
-        c: colors[i % colors.length], // 顏色
+        r: Math.random() * Math.PI * 2, // rotation
+        vr: (Math.random() - 0.5) * 0.4, // rotation speed
+        c: colors[i % colors.length], // colour
       }));
-      const DURATION = 3500; // 動畫總長（毫秒）
+      const DURATION = 3500; // total animation length (ms)
       const t0 = performance.now();
       let prev = t0;
       const frame = (now) => {
-        // f = 相對 60fps 的幀倍數，讓 60Hz / 120Hz 螢幕上的速度一致
+        // f = frame multiplier relative to 60fps, so speed is the same on 60Hz and 120Hz screens
         const f = clamp((now - prev) / 16.67, 0, 3);
         prev = now;
         const age = now - t0;
         ctx.clearRect(0, 0, W, H);
-        ctx.globalAlpha = clamp(1 - age / DURATION, 0, 1); // 逐漸淡出
+        ctx.globalAlpha = clamp(1 - age / DURATION, 0, 1); // fade out over time
         for (const p of parts) {
-          p.vy += 0.35 * f; // 重力
-          p.vx *= Math.pow(0.99, f); // 空氣阻力
+          p.vy += 0.35 * f; // gravity
+          p.vx *= Math.pow(0.99, f); // air drag
           p.x += p.vx * f;
           p.y += p.vy * f;
           p.r += p.vr * f;
@@ -429,7 +429,7 @@
           ctx.translate(p.x, p.y);
           ctx.rotate(p.r);
           ctx.fillStyle = p.c;
-          // 高度隨角度變化，看起來像紙片在翻轉
+          // Height changes with angle so pieces look like flipping paper
           ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h * Math.abs(Math.cos(p.r)));
           ctx.restore();
         }
@@ -441,35 +441,35 @@
     return { burst, clear };
   })();
 
-  // ================================================================ 畫面切換
+  // ================================================================ screens
   const screens = {
-    setup: $('#screen-setup'), // 設定頁
-    game: $('#screen-game'), // 計時頁
-    handover: $('#screen-handover'), // 交接頁
-    reveal: $('#screen-reveal'), // 揭曉頁
+    setup: $('#screen-setup'), // settings screen
+    game: $('#screen-game'), // timer screen
+    handover: $('#screen-handover'), // pass-the-phone screen
+    reveal: $('#screen-reveal'), // result screen
   };
-  let current = null; // 目前顯示的畫面名稱
-  let armedAt = 0; // 在這個時間之前，畫面上的按鈕不接受點擊（防誤觸）
-  let dialArmedAt = 0; // 在這個時間之前，計時按鈕不接受點擊（防連點）
+  let current = null; // name of the screen on display
+  let armedAt = 0; // screen buttons ignore taps until this time (anti-mistap)
+  let dialArmedAt = 0; // the dial ignores taps until this time (anti double tap)
   const armed = () => performance.now() >= armedAt;
 
-  // 切換到指定畫面，並重新繪製該畫面的內容
+  // Switch to a screen and re-render its content
   function show(name, opts = {}) {
     current = name;
     for (const [key, node] of Object.entries(screens)) node.classList.toggle('active', key === name);
     const now = performance.now();
     armedAt = now + GUARD.screen;
     dialArmedAt = now + 300;
-    if (name !== 'reveal') stopReveal(); // 離開揭曉頁：停掉數字動畫和彩帶
-    if (name !== 'game') spin.stop(); // 離開計時頁：停掉旋轉動畫
-    // 設定頁、揭曉頁不需要常亮；遊戲中保持常亮
+    if (name !== 'reveal') stopReveal(); // leaving reveal: stop count-up and confetti
+    if (name !== 'game') spin.stop(); // leaving game: stop the ring animation
+    // Setup and reveal do not need the screen kept on; game screens do
     if (name === 'setup' || name === 'reveal') wake.off();
     else wake.on();
     render[name](opts);
     window.scrollTo(0, 0);
   }
 
-  // 套用目前語言：更新所有帶 data-i18n 屬性的元素文字
+  // Apply the current language: update every element with a data-i18n attribute
   function applyI18n() {
     document.documentElement.lang = settings.lang === 'zh' ? 'zh-CN' : 'en';
     document.title = t('docTitle');
@@ -478,10 +478,10 @@
     $$('.quit').forEach((b) => b.setAttribute('aria-label', t('quit')));
   }
 
-  // ---------------------------------------------------------------- 設定頁
+  // ---------------------------------------------------------------- setup screen
   const playerList = $('#player-list');
 
-  // 繪製玩家名單：每行 = 編號 + 名字輸入框 + 刪除按鈕
+  // Render the player list: each row = number + name input + remove button
   function renderPlayers() {
     const n = settings.players.length;
     playerList.replaceChildren(...settings.players.map((name, i) => {
@@ -490,41 +490,41 @@
       input.type = 'text';
       input.maxLength = LIMITS.nameLen;
       input.value = name;
-      input.placeholder = t('playerN', i + 1); // 沒填名字時顯示「玩家 N」
+      input.placeholder = t('playerN', i + 1); // shown as "Player N" when no name is entered
       input.autocomplete = 'off';
-      input.enterKeyHint = i < n - 1 ? 'next' : 'done'; // 手機鍵盤的 Enter 鍵顯示「下一個 / 完成」
+      input.enterKeyHint = i < n - 1 ? 'next' : 'done'; // mobile keyboard Enter key shows "next" / "done"
       input.dataset.i = String(i);
       input.setAttribute('aria-label', t('playerN', i + 1));
       const rm = el('button', 'p-remove', '×');
       rm.type = 'button';
       rm.dataset.i = String(i);
-      rm.disabled = n <= 1; // 至少保留 1 位玩家
+      rm.disabled = n <= 1; // keep at least 1 player
       rm.setAttribute('aria-label', `${t('remove')} ${t('playerN', i + 1)}`);
       li.append(el('span', 'p-badge', String(i + 1)), input, rm);
       return li;
     }));
     $('#player-count').textContent = String(n);
-    $('#btn-add').disabled = n >= LIMITS.players; // 達到人數上限就不能再加
+    $('#btn-add').disabled = n >= LIMITS.players; // no more players once the limit is reached
   }
 
-  // 把目標時間、容差同步到輸入框
+  // Sync target and tolerance into their inputs
   function syncNumbers() {
     $('#in-target').value = fmtSec(settings.target);
     $('#in-tol').value = fmtSec(settings.tolerance);
   }
 
-  // 繪製整個設定頁
+  // Render the whole setup screen
   function renderSetup() {
     syncNumbers();
     $('#in-auto').checked = settings.autoReveal;
     $('#in-sound').checked = settings.sound;
-    $('#btn-lang').textContent = settings.lang === 'zh' ? 'EN' : '中文'; // 按鈕顯示「要切換去」的語言
+    $('#btn-lang').textContent = settings.lang === 'zh' ? 'EN' : '中文'; // button shows the language to switch to
     renderPlayers();
     $('#stats').textContent = stats.played ? t('stats', stats.played, stats.won) : '';
   }
 
-  // ---------------------------------------------------------------- 計時頁
-  // 頂部的「目標 30s · ±3s」標籤（計時頁和交接頁都有）
+  // ---------------------------------------------------------------- game screen
+  // "Target 30s · ±3s" pill at the top (on both game and handover screens)
   function renderGoal() {
     const text = t('goal', fmtSec(game.target), fmtSec(game.tol));
     $$('.goal').forEach((node) => { node.textContent = text; });
@@ -532,12 +532,12 @@
 
   function renderGame() {
     const n = game.players.length;
-    const done = game.segs.length; // 已完成幾棒
+    const done = game.segs.length; // legs finished so far
     renderGoal();
-    // 自動揭曉模式顯示「第 2 / 4 棒」；循環模式只顯示「第 5 棒」
+    // Auto-reveal mode shows "Turn 2 / 4"; loop mode shows only "Turn 5"
     $('#turn-label').textContent = game.auto ? t('legOf', done + 1, n) : t('leg', done + 1);
-    $('#turn-name').textContent = game.players[done % n]; // 輪流：用取餘數決定輪到誰
-    // 進度點：已完成 = 實心，當前 = 發光空心（只在自動揭曉模式顯示）
+    $('#turn-name').textContent = game.players[done % n]; // players take turns: modulo picks who is up
+    // Progress dots: done = filled, current = glowing ring (auto-reveal mode only)
     const dots = $('#dots');
     dots.replaceChildren();
     if (game.auto) {
@@ -545,7 +545,7 @@
         dots.append(el('span', `dot${k < done ? ' done' : k === done ? ' now' : ''}`));
       }
     }
-    // 計時按鈕：顯示「開始」或「停止」
+    // Dial shows Start or Stop
     const running = game.phase === 'running';
     const dial = $('#dial');
     dial.classList.toggle('running', running);
@@ -558,46 +558,46 @@
     else spin.stop();
   }
 
-  // ---------------------------------------------------------------- 交接頁
+  // ---------------------------------------------------------------- handover screen
   function renderHandover() {
     const n = game.players.length;
-    const last = game.segs[game.segs.length - 1]; // 剛完成的這一棒
+    const last = game.segs[game.segs.length - 1]; // the leg just finished
     renderGoal();
     $('#done-text').textContent = t('done', game.players[last.p]);
-    $('#next-name').textContent = game.players[game.segs.length % n]; // 下一位
+    $('#next-name').textContent = game.players[game.segs.length % n]; // next player
     $('#btn-reveal').textContent = game.auto ? t('revealEarly') : t('revealNow');
   }
 
-  // ---------------------------------------------------------------- 揭曉頁
-  // 揭曉頁用到的元素和動畫狀態
+  // ---------------------------------------------------------------- reveal screen
+  // Reveal screen elements and animation state
   const rv = {
     screen: screens.reveal,
-    time: $('#rv-time'), // 大數字
-    marker: $('#rv-marker'), // 刻度條上的圓點
-    zone: $('#rv-zone'), // 刻度條上的綠色成功區間
-    tline: $('#rv-tline'), // 目標線
-    labels: $('#rv-labels'), // 刻度條下方的數字
-    segs: $('#rv-segs'), // 每棒用時列表
-    raf: 0, // 數字滾動動畫的編號
-    skip: false, // 玩家點了「跳過動畫」
-    done: false, // 動畫是否已結束（結束後按鈕才可按）
-    lo: 0, // 刻度條左端（百分之一秒）
-    hi: 1, // 刻度條右端（百分之一秒）
+    time: $('#rv-time'), // big number
+    marker: $('#rv-marker'), // dot on the scale bar
+    zone: $('#rv-zone'), // green win zone on the scale bar
+    tline: $('#rv-tline'), // target line
+    labels: $('#rv-labels'), // numbers under the scale bar
+    segs: $('#rv-segs'), // per-turn time list
+    raf: 0, // count-up animation id
+    skip: false, // player tapped to skip the animation
+    done: false, // animation finished (buttons only work after this)
+    lo: 0, // left end of the scale (cs)
+    hi: 1, // right end of the scale (cs)
   };
-  // 把時間換算成刻度條上的位置（0 ~ 100%），超出範圍就停在兩端
+  // Map a time to a position on the scale (0–100%); values outside the range stick to the ends
   const scalePos = (cs) => clamp((cs - rv.lo) / (rv.hi - rv.lo), 0, 1) * 100;
 
-  // 更新大數字和刻度條圓點的位置
+  // Update the big number and the scale dot position
   function setRevealTime(cs) {
     rv.time.textContent = fmtCs(cs);
     rv.marker.style.left = `${scalePos(cs)}%`;
   }
 
-  // 排版刻度條：以目標為中心，左右各延伸 span
+  // Lay out the scale bar: centred on the target, extending span to each side
   function layoutScale() {
     const T = Math.round(game.target * 100);
     const tol = Math.round(game.tol * 100);
-    // span 取以下最大值：容差的 2.5 倍、目標的 25%、1 秒
+    // span = largest of: 2.5x tolerance, 25% of target, 1 second
     const span = Math.max(tol * 2.5, T * 0.25, 100);
     rv.lo = T - span;
     rv.hi = T + span;
@@ -613,30 +613,30 @@
       rv.labels.append(s);
     };
     if (tol > 0 && b - a >= 26) {
-      // 綠色區間夠寬：顯示三個數字「27s 30s 33s」
+      // Zone is wide enough: show three labels "27s 30s 33s"
       add(T - tol, `${fmtSec((T - tol) / 100)}s`);
       add(T, `${fmtSec(T / 100)}s`, 't');
       add(T + tol, `${fmtSec((T + tol) / 100)}s`);
     } else {
-      // 區間太窄，三個數字會重疊：只在中間顯示「30s ±0.5」
+      // Zone too narrow, labels would overlap: show one centred label "30s ±0.5"
       add(T, tol > 0 ? `${fmtSec(T / 100)}s ±${fmtSec(tol / 100)}` : `${fmtSec(T / 100)}s`, 't');
     }
   }
 
-  // 填入勝負結果、差距、評語
+  // Fill in the result badge, difference and comment
   function fillResult(diffCs, win) {
     const ad = Math.abs(diffCs);
     const tolCs = Math.round(game.tol * 100);
     $('#rv-badge').textContent = win ? (ad === 0 ? t('perfect') : t('win')) : t('lose');
     $('#rv-diff').textContent = ad === 0 ? t('exact') : diffCs > 0 ? t('over', fmtCs(ad)) : t('under', fmtCs(ad));
-    // 評語：贏了看有多準（0.2 秒內 = 神準）；輸了看差多少（超出容差 1 秒內 = 差一點）
+    // Comment: on a win, how close (within 0.2 s = spot on); on a loss, how far (within 1 s past tolerance = so close)
     let quip;
     if (win) quip = ad === 0 ? t('quipPerfect') : ad <= 20 ? t('quipClose') : t('quipWin');
     else quip = ad - tolCs <= 100 ? t('quipNear') : t('quipFar');
     $('#rv-quip').textContent = quip;
   }
 
-  // 填入每棒用時列表，並標出最短和最長的一棒
+  // Fill in the per-turn time list and tag the shortest and longest turns
   function fillSegments() {
     const list = game.segs;
     let minI = -1;
@@ -648,9 +648,9 @@
         if (s.cs < list[minI].cs) minI = i;
         if (s.cs > list[maxI].cs) maxI = i;
       });
-      if (list[minI].cs === list[maxI].cs) { minI = -1; maxI = -1; } // 全部一樣長就不標
+      if (list[minI].cs === list[maxI].cs) { minI = -1; maxI = -1; } // all equal: no tags
     }
-    let cum = 0; // 累計時間
+    let cum = 0; // running total
     rv.segs.replaceChildren(...list.map((s, i) => {
       cum += s.cs;
       const li = el('li', 'seg');
@@ -658,21 +658,21 @@
       name.append(el('span', null, game.players[s.p]));
       if (i === minI) name.append(el('em', 'tag fast', t('fastest')));
       if (i === maxI) name.append(el('em', 'tag slow', t('slowest')));
-      const time = el('div', 'seg-time', `+${fmtCs(s.cs)}s`); // 這一棒用時
-      time.append(el('small', null, `Σ ${fmtCs(cum)}s`)); // 累計到這一棒的總時間
+      const time = el('div', 'seg-time', `+${fmtCs(s.cs)}s`); // this turn's time
+      time.append(el('small', null, `Σ ${fmtCs(cum)}s`)); // running total up to this turn
       li.append(el('span', 'p-badge', String(i + 1)), name, time);
       return li;
     }));
   }
 
-  // 停止揭曉頁的所有動畫
+  // Stop all reveal screen animations
   function stopReveal() {
     if (rv.raf) cancelAnimationFrame(rv.raf);
     rv.raf = 0;
     confetti.clear();
   }
 
-  // 繪製揭曉頁。opts.animate = true 時播放數字滾動動畫；false 時直接顯示結果（例如刷新頁面後恢復）
+  // Render the reveal screen. opts.animate = true plays the count-up; false shows the result at once (e.g. after a reload)
   function renderReveal(opts = {}) {
     const total = totalCs();
     const { diffCs, win } = judge(total, game.target, game.tol);
@@ -684,12 +684,12 @@
     fillResult(diffCs, win);
     fillSegments();
 
-    // 動畫結束：顯示結果、按鈕；withFx = 是否播放音效、彩帶、震動
+    // Animation finished: show result and buttons; withFx = play sound, confetti and vibration
     const finish = (withFx) => {
       setRevealTime(total);
       rv.screen.classList.add('revealed', win ? 'win' : 'lose');
       rv.done = true;
-      armedAt = Math.max(armedAt, performance.now() + 400); // 按鈕出現後再等 0.4 秒才可按
+      armedAt = Math.max(armedAt, performance.now() + 400); // buttons work 0.4 s after they appear
       if (!withFx) return;
       if (win) { sfx.win(); confetti.burst(); buzz([40, 60, 40]); }
       else { sfx.lose(); buzz(160); }
@@ -697,12 +697,12 @@
 
     if (!opts.animate) { finish(false); return; }
     setRevealTime(0);
-    // 動畫長度 1.6 ~ 3.2 秒，總時間越長動畫越長
+    // Animation lasts 1.6–3.2 s; longer totals get a longer animation
     const duration = clamp(1600 + total * 0.25, 1600, 3200);
     const t0 = performance.now();
     const step = (now) => {
-      const p = rv.skip ? 1 : clamp((now - t0) / duration, 0, 1); // 進度 0 ~ 1
-      const eased = 1 - Math.pow(1 - p, 4); // 緩動：越接近結尾越慢，製造緊張感
+      const p = rv.skip ? 1 : clamp((now - t0) / duration, 0, 1); // progress 0–1
+      const eased = 1 - Math.pow(1 - p, 4); // easing: slows down near the end for suspense
       setRevealTime(Math.round(total * eased));
       if (p < 1) rv.raf = requestAnimationFrame(step);
       else { rv.raf = 0; finish(true); }
@@ -710,18 +710,18 @@
     rv.raf = requestAnimationFrame(step);
   }
 
-  // 畫面名稱 → 對應的繪製函式
+  // Screen name -> render function
   const render = { setup: renderSetup, game: renderGame, handover: renderHandover, reveal: renderReveal };
 
-  // ================================================================ 遊戲動作
-  // 確認輸入框的數字：不合法就恢復原值，超出範圍就限制到上下限
+  // ================================================================ actions
+  // Commit a number input: invalid input restores the old value, out-of-range input is clamped
   function commitNumber(input, key, lo, hi) {
     settings[key] = round1(clamp(toNum(input.value, settings[key]), lo, hi));
     input.value = fmtSec(settings[key]);
     saveSettings();
   }
 
-  // 開新的一局：把目前設定複製一份到遊戲中（中途改設定不影響本局）
+  // Start a new game: copy the current settings into the game (editing settings mid-game has no effect)
   function startGame() {
     game = {
       phase: 'ready',
@@ -729,7 +729,7 @@
       startWall: 0,
       target: settings.target,
       tol: settings.tolerance,
-      players: settings.players.map((p, i) => p.trim() || t('playerN', i + 1)), // 空名字換成「玩家 N」
+      players: settings.players.map((p, i) => p.trim() || t('playerN', i + 1)), // empty names become "Player N"
       auto: settings.autoReveal,
       counted: false,
     };
@@ -738,20 +738,20 @@
     show('game');
   }
 
-  // 結束並刪除目前的遊戲
+  // End and delete the current game
   function clearGame() {
     game = null;
     store.del(KEYS.game);
     spin.stop();
   }
 
-  // 按下計時按鈕：準備中 → 開始計時；計時中 → 停止
+  // Dial pressed: ready -> start timing; running -> stop
   function dialAction() {
     if (!game || current !== 'game') return;
     const now = performance.now();
-    if (now < dialArmedAt) return; // 防連點：距離上次按下不到 350ms 就忽略
+    if (now < dialArmedAt) return; // anti double tap: ignore presses within 350 ms of the last one
     dialArmedAt = now + GUARD.dial;
-    // 重新播放按下的縮放動畫（先移除 class，強制重排，再加回去）
+    // Replay the press animation (remove class, force reflow, add it back)
     const dial = $('#dial');
     dial.classList.remove('pulse');
     void dial.offsetWidth;
@@ -760,10 +760,10 @@
     else if (game.phase === 'running') stopLeg(now);
   }
 
-  // 開始一棒：記下開始時間
+  // Start a leg: record the start time
   function startLeg(now) {
-    startPerf = now; // 精準計時用（performance.now 不受修改系統時間影響）
-    game.startWall = Date.now(); // 刷新頁面後恢復用
+    startPerf = now; // precise timing (performance.now is not affected by system clock changes)
+    game.startWall = Date.now(); // used to recover after a reload
     game.phase = 'running';
     saveGame();
     sfx.start();
@@ -771,7 +771,7 @@
     renderGame();
   }
 
-  // 停止一棒：算出用時並記錄
+  // Stop a leg: compute and record its duration
   function stopLeg(now) {
     const ms = Math.max(0, now - startPerf);
     game.segs.push({ p: game.segs.length % game.players.length, cs: Math.round(ms / 10) });
@@ -781,14 +781,14 @@
     sfx.stop();
     buzz(25);
     if (game.auto && game.segs.length >= game.players.length) {
-      reveal(); // 自動揭曉模式：最後一位已完成，直接揭曉
+      reveal(); // auto-reveal mode: last player is done, reveal now
     } else {
       saveGame();
       show('handover');
     }
   }
 
-  // 揭曉結果，並計入戰績（每局只計一次）
+  // Reveal the result and add it to stats (once per game)
   function reveal() {
     game.phase = 'reveal';
     game.startWall = 0;
@@ -802,9 +802,9 @@
     show('reveal', { animate: true });
   }
 
-  // ================================================================ 事件綁定
-  // ---------------------------------------------------------------- 設定頁
-  // 切換語言
+  // ================================================================ events
+  // ---------------------------------------------------------------- setup screen
+  // Switch language
   $('#btn-lang').addEventListener('click', () => {
     settings.lang = settings.lang === 'zh' ? 'en' : 'zh';
     saveSettings();
@@ -812,7 +812,7 @@
     renderSetup();
   });
 
-  // 「−」「+」按鈕：目標每次 ±1 秒，容差每次 ±0.5 秒
+  // − / + buttons: target steps by ±1 s, tolerance by ±0.5 s
   $$('.step').forEach((btn) => btn.addEventListener('click', () => {
     const delta = parseFloat(btn.dataset.delta);
     if (btn.dataset.field === 'target') {
@@ -824,7 +824,7 @@
     syncNumbers();
   }));
 
-  // 直接在輸入框輸入數字：離開輸入框（change）時才確認，打字途中不打擾
+  // Typing a number: committed on change (leaving the input), not while typing
   const inTarget = $('#in-target');
   const inTol = $('#in-tol');
   const commitTarget = () => commitNumber(inTarget, 'target', LIMITS.targetMin, LIMITS.targetMax);
@@ -832,11 +832,11 @@
   inTarget.addEventListener('change', commitTarget);
   inTol.addEventListener('change', commitTol);
   [inTarget, inTol].forEach((input) => {
-    input.addEventListener('focus', () => { try { input.select(); } catch (_) { /* 忽略 */ } }); // 點進去自動全選，方便直接改
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); }); // 按 Enter 確認
+    input.addEventListener('focus', () => { try { input.select(); } catch (_) { /* ignore */ } }); // select all on focus for quick editing
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') input.blur(); }); // Enter confirms
   });
 
-  // 修改玩家名字（用事件委派：只在名單上綁一次，新增的輸入框也會生效）
+  // Edit player names (event delegation: one listener on the list also covers newly added inputs)
   playerList.addEventListener('input', (e) => {
     const input = e.target;
     if (!input.classList.contains('p-input')) return;
@@ -846,7 +846,7 @@
       saveSettings();
     }
   });
-  // 在名字輸入框按 Enter：跳到下一位；最後一位就收起鍵盤
+  // Enter in a name input: jump to the next one; on the last one, close the keyboard
   playerList.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' || !e.target.classList.contains('p-input')) return;
     e.preventDefault();
@@ -855,7 +855,7 @@
     if (next) next.focus();
     else e.target.blur();
   });
-  // 刪除玩家
+  // Remove a player
   playerList.addEventListener('click', (e) => {
     const btn = e.target.closest('.p-remove');
     if (!btn || settings.players.length <= 1) return;
@@ -863,7 +863,7 @@
     saveSettings();
     renderPlayers();
   });
-  // 新增玩家
+  // Add a player
   $('#btn-add').addEventListener('click', () => {
     if (settings.players.length >= LIMITS.players) return;
     settings.players.push('');
@@ -871,38 +871,38 @@
     renderPlayers();
   });
 
-  // 開關：自動揭曉、音效
+  // Toggles: auto-reveal, sound
   $('#in-auto').addEventListener('change', (e) => { settings.autoReveal = e.target.checked; saveSettings(); });
   $('#in-sound').addEventListener('change', (e) => { settings.sound = e.target.checked; saveSettings(); });
 
-  // 開始遊戲（先確認輸入框裡還沒確認的數字）
+  // Start game (commit any number still being typed first)
   $('#btn-start').addEventListener('click', () => {
     commitTarget();
     commitTol();
     startGame();
   });
 
-  // ---------------------------------------------------------------- 計時頁
-  // 計時按鈕用 pointerdown（手指一碰到就觸發），比 click 少約 100ms 延遲，計時更準
+  // ---------------------------------------------------------------- game screen
+  // The dial uses pointerdown (fires on first touch), ~100 ms faster than click, so timing is more accurate
   const dialBtn = $('#dial');
   dialBtn.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0 || !e.isPrimary) return; // 只接受主要按鍵 / 第一根手指
+    if (e.button !== 0 || !e.isPrimary) return; // primary button / first finger only
     e.preventDefault();
     dialAction();
   });
-  dialBtn.addEventListener('contextmenu', (e) => e.preventDefault()); // 防止長按跳出選單
-  // 電腦上可以用空白鍵或 Enter 操作計時按鈕
+  dialBtn.addEventListener('contextmenu', (e) => e.preventDefault()); // block the long-press menu
+  // On desktop, Space or Enter also works the dial
   document.addEventListener('keydown', (e) => {
     if (current !== 'game' || e.repeat) return;
-    if (e.target instanceof HTMLButtonElement && e.target !== dialBtn) return; // 焦點在其他按鈕（如退出）時不攔截
+    if (e.target instanceof HTMLButtonElement && e.target !== dialBtn) return; // do not hijack other focused buttons (e.g. quit)
     if (e.code === 'Space' || e.key === 'Enter') {
       e.preventDefault();
       dialAction();
     }
   });
-  document.addEventListener('touchstart', () => {}, { passive: true }); // 讓 iOS 的 :active 按下效果生效
+  document.addEventListener('touchstart', () => {}, { passive: true }); // enables the :active press style on iOS
 
-  // 退出本局（需要確認）
+  // Quit the game (with confirmation)
   $$('.quit').forEach((btn) => btn.addEventListener('click', () => {
     if (!game) return;
     if (window.confirm(t('quitConfirm'))) {
@@ -911,8 +911,8 @@
     }
   }));
 
-  // ---------------------------------------------------------------- 交接頁
-  // 「我準備好了」：輪到下一位
+  // ---------------------------------------------------------------- handover screen
+  // "I'm ready": next player's turn
   $('#btn-ready').addEventListener('click', () => {
     if (!armed() || !game || game.phase !== 'handover') return;
     game.phase = 'ready';
@@ -920,43 +920,43 @@
     sfx.unlock();
     show('game');
   });
-  // 「結束並揭曉 / 提前揭曉」
+  // "Finish & reveal" / "Reveal now"
   $('#btn-reveal').addEventListener('click', () => {
     if (!armed() || !game || game.phase !== 'handover') return;
     sfx.unlock();
     reveal();
   });
 
-  // ---------------------------------------------------------------- 揭曉頁
-  // 動畫播放中點任何地方 = 跳過動畫
+  // ---------------------------------------------------------------- reveal screen
+  // Tap anywhere during the animation to skip it
   rv.screen.addEventListener('pointerdown', () => { if (!rv.done) rv.skip = true; });
-  // 再來一局（沿用相同設定）
+  // Play again (same settings)
   $('#btn-again').addEventListener('click', () => {
     if (!armed() || !rv.done) return;
     startGame();
   });
-  // 回到設定頁
+  // Back to setup
   $('#btn-settings').addEventListener('click', () => {
     if (!armed() || !rv.done) return;
     clearGame();
     show('setup');
   });
 
-  // 從後台切回來時，重新申請螢幕常亮
+  // Re-request the wake lock when returning from the background
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && (current === 'game' || current === 'handover')) wake.on();
   });
 
-  // ================================================================ 啟動
+  // ================================================================ boot
   applyI18n();
   if (game) {
-    // 有未完成的遊戲（例如刷新了頁面）：回到對應的畫面
+    // Unfinished game found (e.g. page was reloaded): go back to the matching screen
     const screen = game.phase === 'reveal' ? 'reveal' : game.phase === 'handover' ? 'handover' : 'game';
     show(screen, { animate: false });
   } else {
     show('setup');
   }
 
-  // 給自動化測試用的介面（不影響遊戲）
+  // Hook for automated tests (does not affect the game)
   window.__vx = { judge, state: () => ({ screen: current, game, settings, stats }) };
 })();
